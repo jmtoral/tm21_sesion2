@@ -1,0 +1,326 @@
+###################################
+#      Main cleaner text function     #
+###################################
+
+# load libraries
+library(readr)
+library(rlang)
+library(tidyverse)
+library(tm)
+library(factoextra)
+library(data.table)
+library(lubridate)
+library(formattable)
+library(dplyr)
+library(devtools)
+library(qdapRegex)
+library(stringr)
+#library(pluralize)
+library(parallel)
+
+# Brief explanation
+
+# This program cleans the Meetings database to analyze, through most frequent terms, 
+# what were the topics acknowledged...
+#1. Test is all in Spanish.
+#2. Methodology:
+# - To remove: punctuation marks, stopwords, specific words, accents
+#3. We count the words and identify those to be eliminated in an iterative process of
+# refinement the cleaning 
+
+# Remove anything other than English letters or spaces
+removeNumPunct <- function(x) gsub("[^[:alpha:][:space:]]*", "", x)
+
+# Remove accents (only for spanish tweets)
+unwanted_array <-  c( 'Š'='S', 'š'='s', 'Ž'='Z', 'ž'='z', 'À'='A', 'Á'='A', 'Â'='A', 'Ã'='A', 'Ä'='A', 'Å'='A', 'Æ'='A', 'Ç'='C', 'È'='E', 'É'='E',
+                      'Ê'='E', 'Ë'='E', 'Ì'='I', 'Í'='I', 'Î'='I', 'Ï'='I', 'Ñ'='N', 'Ò'='O', 'Ó'='O', 'Ô'='O', 'Õ'='O', 'Ö'='O', 'Ø'='O', 'Ù'='U',
+                      'Ú'='U', 'Û'='U', 'Ü'='U', 'Ý'='Y', 'Þ'='B', 'ß'='Ss', 'à'='a', 'á'='a', 'â'='a', 'ã'='a', 'ä'='a', 'å'='a', 'æ'='a', 'ç'='c',
+                      'è'='e', 'é'='e', 'ê'='e', 'ë'='e', 'ì'='i', 'í'='i', 'î'='i', 'ï'='i', 'ð'='o', 'ñ'='n', 'ò'='o', 'ó'='o', 'ô'='o', 'õ'='o',
+                      'ö'='o', 'ø'='o', 'ù'='u', 'ú'='u', 'û'='u', 'ý'='y', 'ý'='y', 'þ'='b', 'ÿ'='y' )
+
+removeAccents <- function(x) str_replace_all(x, unwanted_array)
+
+word_array <-  c('abono' = 'abonos', 'fosfatos' = 'abonos', 'fosforico'	=	'abonos', 'fosforo'=	'abonos', 'superfosfato'=	'abonos', 'superfosfatos'=	'abonos',
+                 'aceite'	=	'olivarera',	'olivareros'	=	'olivarera', 'aceites'	=	'olivarera', 'aceiteros'	=	'olivarera',
+                 'sulfurico'	=	'acidosulfurico',	'acido'	=	'acidosulfurico', 																																																
+                 'admision temporal'	=	'admisiontemporal',	'admisionestemporales'	=	'admisiontemporal',	'admisiones temporales'	=	'admisiontemporal',																																															
+                 'agricola'	=	'agricultura',	'agricolas'	=	'agricultura',
+                 'agricultores'	=	'labriego',	'labriegos'	=	'labriego',	'labradores'	=	'labriego',	'jornalero'	=	'labriego',	'agricultor'	=	'labriego',	'labrador'	=	'labriego',	'bracero'	=	'labriego',	'braceros'	=	'labriego',	'trabajadores agricolas'	=	'trabajadoresagricolas', 'trabajadoresagricolas'= 'labriego', 'jornaleros'= 'labriego',
+                 'acero'	=	'aceros',
+                 'alambre'	=	'herramientas',	'tubos'	=	'herramientas',	'camas'	=	'herramientas',	'puntas'	=	'herramientas',	'forjado'	=	'herramientas',	
+                 'alcohol'	=	'alcoholes',
+                 'aleman'	=	'alemania',	'alemanes'	=	'alemania',	'prusiano'	=	'alemania', 'alemana'=	'alemania', 'germano'=	'alemania', 'hispanoaleman'=	'alemania',
+                 'algodon rama'	=	'algodonrama',
+                 'algodon'	=	'algodoneros',	'algodones'	=	'algodoneros',	'algodonera'	=	'algodoneros'	,
+                 'arroz valencia'	=	'arrozvalencia',	'arroceros valencia'	=	'arrozvalencia',
+                 'arroz'	=	'arroceros',	'arroces'	=	'arroceros',	
+                 'asturianos carboneros'	=	'asturianoscarboneros'	,
+                 'aumento arancelario'	=	'aumentoarancelario',	
+                 'azucar'	=	'azucares',	
+                 'aranceles'	=	'arancel',	'regimen arancelario'	=	'arancel',	'regimenarancelario'	=	'arancel',	'sistema arancelario'	=	'arancel',
+                 'barcelones'	=	'barcelona',	'barceloneses'	=	'barcelona',	'tarrasa'	=	'barcelona',	'sabadell'	=	'barcelona', 'manresa'	=	'barcelona',	
+                 'base quinta'	=	'base5' ,	'base 5'	=	'base5' , 
+                 'base 5a'='base5', 'base 5ª'='base5',
+                 'bilbao'	=	'vascongadas',	'vizcaya'	=	'vascongadas',	
+                 'bismarck'	=	'bismark',
+                 'borjas blancas'	=	'borjasblancas',
+                 'burdeos'	=	'bordeleses',
+                 'carbon'	=	'carbones', 'carboneras'	=	'carbones', 'hulla'	=	'carbones', 'hullas'	=	'carbones',
+                 'castilla'	=	'castillas',	'castellano'	=	'castillas',	'castellanos'	=	'castillas', 'valladolid'	=	'castillas', 'castellana'	=	'castillas',
+                 'catalanes'	=	'cataluna',	'catalan'	=	'cataluna',	'catalana'	=	'cataluna',	'catalanas'=	'cataluna', 'catalanismo'=	'cataluna',
+                 'cereales'	=	'granos', 'trigos'	=	'granos',	'harinas'	=	'granos',	'harina'	=	'granos',	'trigo'	=	'granos', 'grano'=	'granos',
+                 'comercio madrid'	=	'comerciomadrid',	'comercio madrileno'	=	'comerciomadrid',	'comerciantes madrilenos'	=	'comerciomadrid',
+                 'comerciantes'	=	'comerciante',	'tenderos'	=	'comerciante',	'mercantil'	=	'comerciante',	'clase comercio'	=	'comerciante',	'mercantiles'	=	'comerciante',	
+                 'consumidores'	=	'consumidor',	'consumo'	=	'consumidor',	'consume'	=	'consumidor',	'consumo'	=	'consumidor',	'consumidoras'	=	'consumidor',	'consumidora'	=	'consumidor',
+                 'contribucion'	=	'recaudacion',	'contribuyente'	=	'recaudacion',	'contribuyentes'	=	'recaudacion',	'contribuciones'	=	'recaudacion',
+                 'convenio 1877'	=	'conveniofrances',	'convenio frances'	=	'conveniofrances',
+                 'camaras'	=	'cortes',	'congreso'	=	'cortes',	'senado'	=	'cortes',	'diputados'	=	'cortes',	'diputado'	=	'cortes',	'senadores'	=	'cortes',
+                 'cosmopolitismo'	=	'humanidad',	'fraternidad'	=	'humanidad',	'hermandad'	=	'humanidad',	'solidaridad'	=	'humanidad', 
+                 'cuestion arancelaria'	=	'cuestionarancelaria',	'materia arancelaria'	=	'cuestionarancelaria',	'cuestiones arancelarias'	=	'cuestionarancelaria'	,
+                 'cuestion social'	=	'problemasocial',	'tema social'	=	'problemasocial',	'problema social'	=	'problemasocial',	
+                 'derechos arancelarios'	=	'tarifa', 	'derecho arancelario'	=	'tarifa',	'tarifas'	=	'tarifa',	'derecho importacion'	=	'tarifa',	'derechos importacion'	=	'tarifa',	'derecho protector'	=	'tarifa',	'derechos protectores'	=	'tarifa',	'derechos entrada'	=	'tarifa',
+                 'derecho fiscal'	=	'arancelfiscal'	,'derechos fiscales'	=	'arancelfiscal'	,'derecho balanza'	=	'arancelfiscal',	'derechos balanza'	=	'arancelfiscal',	'principio fiscal'	=	'arancelfiscal'	,	'tarifafiscal'=	'arancelfiscal'	,
+                 'derechos'='tarifa', 'derecho'='tarifa',
+                 'diputados catalanes'	=	'diputadoscatalanes' ,
+                 'ejercitos'	=	'ejercito',	'fuerzas armadas'	=	'ejercito',	'marina guerra'	=	'ejercito',	'armas'	=	'ejercito',	'paz armada'	=	'ejercito',	'hombres armados'	=	'ejercito',	'militarismo'	=	'ejercito',	'fortificaciones'	=	'ejercito',	'guerreros'	=	'ejercito',	'soldados'	=	'ejercito',	'escuadra'	=	'ejercito',	'escuadras'	=	'ejercito',		
+                 'marina'	=	'ejercito', 'armada'	=	'ejercito',	'armadas'	=	'ejercito', 'armados'	=	'ejercito',
+                 'emigracion'	=	'inmigracion',	'emigrar'	=	'inmigracion',	'emigrante'	=	'inmigracion',	'emigrantes'	=	'inmigracion',	'emigran'	=	'inmigracion',	'inmigrantes'	=	'inmigracion',	'emigraban'	=	'inmigracion',	'emigren'	=	'inmigracion', 'emigraciones'=	'inmigracion',
+                 'fisco'	=	'erario',	'presupuesto'	=	'erario',	'tesoro'	=	'erario',	'hacienda'	=	'erario',	'presupuestos'	=	'erario',	'rendimiento aduanas'	=	'erario',	'deficit publico' =	'erario',
+                 'deficit'	=	'erario',	
+                 'escala alcoholica'	=	'grados',	'graduaciones alcoholicas'	=	'grados',	'sikes'	=	'grados	', 'grado'=	'grados	', 'graduacion'=	'grados	', 'sickes'=	'grados	', 'tarifaalcoholica'=	'grados	',
+                 'escuela economica'	=	'ideales',	'escuela economista'	=	'ideales',		'escuela librecambista'	=	'ideales',	'nuestras ideas'	=	'ideales',	'ideal cientifico'	=	'ideales',	'ideas economistas'	=	'ideales',	'escuela'	=	'ideales',	'economia'	=	'ideales', 
+                 'cienciaeconomica'	=	'ideales',	'ciencia economica'	=	'ideales',	'ciencias economicas'	=	'ideales',	'esfera economica' =	'ideales',	'principio cientifico'	=	'ideales',	'cientifica'	=	'ideales',	'cientifico'	=	'ideales',	'leyes economicas'	=	'ideales',	'ley natural'	=	'ideales',	'leyes naturales'	=	'ideales',	'doctrina'	=	'ideales',	'doctrinas'	=	'ideales',	'doctrinas economicas'	=	'ideales',	'principios economistas'	=	'ideales',		'teoria'	= 'ideales', 	'teorias'='ideales',
+                 'economista'	=	'ideales', 'economistas'	=	'ideales',	'ideas'	=	'ideales', 	'principio'	=	'ideales',	'principios'	=	'ideales',
+                 'estados unidos'	=	'estadosunidos',	'gobierno americano'	=	'estadosunidos'	, 'norteamericana'	=	'estadosunidos'	, 'norteamericano'	=	'estadosunidos'	, 'nuevayork'	=	'estadosunidos'	, 'norteamericanos'	=	'estadosunidos'	,
+                 'europa'	=	'europeos'	, 'europeas'=	'europeos', 'europea' =	'europeos',
+                 'exportacion'	=	'exportaciones',	'exportar'	=	'exportaciones'	, 'exportadores'=	'exportaciones'	,
+                 'fabricantes hierro'	=	'fabricanteshierro',
+                 'nacion francesa'	=	'francia',	'frances'	=	'francia',	'francesa'	=	'francia',	'francesas'	=	'francia',	'hispano frances'	=	'francia',	'paris'	=	'francia', 'franceses'=	'francia', 'francoespanol'=	'francia',
+                 'fruta'	=	'frutales',	'frutas'	=	'frutales',	'frutos'	=	'frutales',	'castana'	=	'frutales',	'nuez'	=	'frutales',	'manzana'	=	'frutales',	'avellana'	=	'frutales',	'avellanas'	=	'frutales',	'almendra'	=	'frutales',	'almendras'	=	'frutales',	'naranja'	=	'frutales',	'naranjas'	=	'frutales',	'pasa'	=	'frutales',	'pasas'	=	'frutales',	'higos'	=	'frutales',	'limon'	=	'frutales',	'lion'	=	'frutales',	'limones'	=	'frutales',
+                 'fundiciones hierro'	=	'lingotes',	'fundicion hierro'	=	'lingotes', 'lingote'	=	'lingotes', 'fundiciones'	=	'lingotes',
+                 'galicia'	=	'gallego',	'gallega'	= 'gallego' , 'gallegos'	= 'gallego',
+                 'ganado gallego'	=	'ganadogallego'	,'vacuno galicia'	=	'ganadogallego'	, 'ganadosgallegos'=	'ganadogallego',
+                 'ganado'	=	'ganaderos', 'ganadera'=	'ganaderos', 'ganadero'=	'ganaderos', 'ganados'=	'ganaderos', 'ganaderia'=	'ganaderos', 'pecuaria'=	'ganaderos',
+                 'hierros'	=	'ferreteros',	'hierro'	=	'ferreteros',	
+                 'hilazas'	=	'estambre',	'hilaza'	=	'estambre',	'hilo'	=	'estambre',	'hilos'	=	'estambre',	'fibras'	=	'estambre',	'estambres'	=	'estambre', 'hilado'	=	'estambre', 'hiladores'	=	'estambre', 'hilados'	=	'estambre',
+                 'industria algodon'	=	'industriaalgodon',	'factoriasalgodoneros'=	'industriaalgodon', 'industriaalgodoneros'=	'industriaalgodon', 'algodoneroscatalanes'=	'industriaalgodon',
+                 'industria catalana'	=	'industriacatalana',	'fabricas catalanas'	=	'industriacatalana',	'fabricantes catalanes'	=	'industriacatalana',	'manufacturas catalanas'	=	'industriacatalana',	'industria cataluna'	=	'industriacatalana',	'industriales cataluna'	=	'industriacatalana', 'fabricantecataluna'=	'industriacatalana', 'fabricantescataluna'=	'industriacatalana', 'fabricacioncataluna'=	'industriacatalana', 'factoriasbarcelona'=	'industriacatalana', 'tejedorescataluna'=	'industriacatalana', 'industriacataluna'=	'industriacatalana',
+                 'industria lana'	=	'industrialana'	, 'factoriaslaneros'=	'industrialana'	, 'produccionlaneros'=	'industrialana'	, 'industrialaneros'=	'industrialana'	, 'industriaslaneros'=	'industrialana'	, 'industrialaneros'=	'industrialana'	, 'lanerosfactorias'=	'industrialana'	,
+                 'industria exportacion'	=	'industriaexportacion'	,
+                 'industria nacional' =	'produccionnacional',	'produccion nacional'	=	'produccionnacional', 
+                 'industria quimica'	=	'quimicos', 'quimica'=	'quimicos', 'quimicas'=	'quimicos', 'quimico'=	'quimicos',
+                 'industria madrid'	=	'industriamadrid',	
+                 'industria naviera'	=	'navieros',	
+                 'industria siderurgica'	=	'siderurgia',	
+                 'industria taponera'	=	'industriataponera', 'taponera'	=	'industriataponera', 'taponeria'	=	'industriataponera',	
+                 'industria vinincultora'	=	'industriavinincultora',	'industria agricola'	=	'industriavinincultora',	'produccion vinicola nacional'	=	'industriavinincultora',	'industriaagricultura'	=	'industriavinincultora', 'industriasagricultura'	=	'industriavinincultora', 'productoresagricultura'	=	'industriavinincultora',
+                 'gobierno ingles'	=	'inglaterra',	'gran bretana'	=	'inglaterra',	'reino unido'	=	'inglaterra',	'londres'	=	'inglaterra',	'bretana'	=	'inglaterra', 'britanico'	=	'inglaterra', 'britanica'	=	'inglaterra', 'albion'=	'inglaterra',
+                 'ingleses'	=	'inglaterra',	'inglesas'	=	'inglaterra',	'inglesa'	=	'inglaterra',	'anglo espanol'	=	'inglaterra', 'ingles'	=	'inglaterra',
+                 'interes general'	=	'interesescomunes',	'intereses generales'	=	'interesescomunes',	'interes publico'	=	'interesescomunes',	'interes nacional'	=	'interesescomunes',	'conveniencia publica'	=	'interesescomunes',	'bienestar nacion'	=	'interesescomunes',	'intereses comunes'	=	'interesescomunes',
+                 'interes privado'	=	'interesprivado',	'intereses particulares'	=	'interesprivado',	'privilegio'	=	'interesprivado',	'privilegios'	=	'interesprivado',	'privilegiado'	=	'interesprivado',	'privilegiados'	=	'interesprivado',	'beneficio particular'	=	'interesprivado',	'interes egoista'	=	'interesprivado',	'conveniencias particulares'	=	'interesprivado',
+                 'intereses regionales'	=	'interesesregionales',	'intereses locales'	=	'interesesregionales',	'interes local'	=	'interesesregionales',
+                 'jornal'	=	'salarios',	'jornales'	=	'salarios',	'salario'	=	'salarios',	
+                 'lana rama'	=	'lanarama',
+                 'lana'	=	'laneros',	'lanas'	=	'laneros',	'laneria'	=	'laneros',	'lanerias'	=	'laneros',	'lanera'	=	'laneros', 'estambre'=	'laneros', 'estambrera'=	'laneros', 'laneras'=	'laneros',	'lanar'=	'laneros',
+                 'librecambio'	=	'libertadcomercio',	'libre cambista' = 'libertadcomercio', 'librecambista'='libertadcomercio', 'librecambistas'='libertadcomercio', 'librecambio' = 'libertadcomercio', 'libertad'='libertadcomercio',
+                 'libre cambismo' ='libertadcomercio', 'librecambismo'='libertadcomercio',
+                 'liga agraria' =	'ligueros',	'ligaagraria' =	'ligueros', 'liga agricola' =	'ligueros', 'ligaagricola' =	'ligueros',
+                 'liga manchester'	=	'peel',	'cobden'	=	'peel'	,		
+                 'manufactura'	=	'manufactureros',	'manufacturas'	=	'manufactureros', 'fabricas'	=	'manufactureros',	'fabrica'	=	'manufactureros',	'fabricantes'	=	'manufactureros',	'industria fabril'	=	'manufactureros',	'fabril'	=	'manufactureros',	'fabricante'	=	'manufactureros',	'fabriles'	=	'manufactureros', 'factorias'	=	'manufactureros', 'manufactureras'	=	'manufactureros', 'manufacturero'	=	'manufactureros', 'talleres'=	'manufactureros',
+                 'maquina'	=	'maquinas',	'maquinaria'	=	'maquinas',
+                 'mercado circunstancias'	=	'mercadoeventual',	'mercado eventual'	=	'mercadoeventual',
+                 'mercados estables'	=	'mercadosestables',	'mercados fijos'	=	'mercadosestables',	'mercados seguros'	=	'mercadosestables',	'mercado seguro'	=	'mercadosestables',	'mercadoestables'	=	'mercadosestables',
+                 'mercado extranjero'	=	'mercadoextranjero',	'mercados extranjeros'	=	'mercadoextranjero',	
+                 'mercado ingles'	=	'mercadoingles'	,
+                 'metal'	=	'metales'	,
+                 'cobre'	=	'minerales',	'bronce'	=	'minerales',	'cobres'	=	'minerales',	'plomos'	=	'minerales', 'mineras'	=	'minerales', 'minero'	=	'minerales', 'mineria'	=	'minerales', 'minera'	=	'minerales',
+                 'modus vivendi inglaterra'	=	'convenioinglaterra',	'modus vivendi'	=	'convenioinglaterra',	'convenio inglaterra'	=	'convenioinglaterra',	'convenio provisional'	=	'convenioinglaterra',	
+                 'nacion mas favorecida'	=	'nacionmasfavorecida',	'nacion favorecida'	=	'nacionmasfavorecida',
+                 'clase obrera'	=	'obreros',	'obreras'	=	'obreros',	'obrero'	=	'obreros',	'obrera'	=	'obreros',	'proletarios'	=	'obreros',	'clase proletaria'	=	'obreros',	'clases proletarias'	=	'obreros',	'clases trabajadoras'	=	'obreros',	'proletariado'=	'obreros',
+                 'obras publicas'=	'obraspublicas',	'canales'	=	'obraspublicas',	'carreteras'	=	'obraspublicas',	'canal'	=	'obraspublicas'	,'carretera'	=	'obraspublicas'	,
+                 'opinion publica'	=	'opinionpublica',	'opinion general'	=	'opinionpublica',	'voluntad nacional'	=	'opinionpublica',	'atencion publica'	=	'opinionpublica',	'atencion publico'	=	'opinionpublica',	'opinion'	=	'opinionpublica',
+                 'ordenanzas aduanas'	=	'tramites',	'ordenanzas'	=	'tramites',
+                 'petroleo'	=	'refinadores',	'petroleos'	=	'refinadores',	'petroleros'	=	'refinadores',	'refino'	=	'refinadores',	'refinacion'='refinadores',	'refinar'	=	'refinadores'	, 'gasolina'	=	'refinadores'	,
+                 'pobreza'	=	'miseria', 'pobres'	=	'miseria',
+                 'portugueses'	=	'portugal',	'lisboa' =	'portugal',	'lusitania'	=	'portugal',	'portugues'	=	'portugal',	'lusitana'	=	'portugal',
+                 'prensa'	=	'periodistas',	'periodico'	=	'periodistas',	'periodicos'	=	'periodistas',	'periodista'	=	'periodistas', 'periodisticas'	=	'periodistas',
+                 'primera columna'	=	'primeracolumna',	
+                 'segunda columna'	=	'segundacolumna',	
+                 'primeras materias'	=	'primerasmaterias',	'primera materia'	=	'primerasmaterias',	'materias primeras'	=	'primerasmaterias',	
+                 'produccion vinicola'	=	'vino',	'vinateros'	=	'vino',	'vinedos'	=	'vino',	'caldos'	=	'vino'	,'produccion vino'	=	'vino',	'bodegas'	=	'vino',	'productores vinicolas'	=	'vino',	'vinicultores'	=	'vino', 'productor vino'	=	'vino',	'vid'	=	'vino',	'vides'	=	'vino',	'tintos'	=	'vino'	,'vinedo'	=	'vino', 'agricultura vinicola'	=	'vino',	'vinos'='vino', 'vinicolas'='vino', 'viticola'='vino', 'cosecheros'='vino', 'viticultores'='vino', 'vinicultora'='vino',
+                 'prorroga tratados'	=	'prorrogacion',	'prorroga'	=	'prorrogacion',
+                 'proteccionistaista' = 'proteccionismo', 'proteccionismoistas' = 'proteccionismo','proteccionismoista' = 'proteccionismo','proteccionismoismo'='proteccionismo',
+                 'proteccionismo castellano'	=	'proteccionismocastellano',	'proteccionismocastilla'=	'proteccionismocastellano',
+                 'proteccionismo catalan' =	'proteccionismocatalan',	'proteccionistas catalanes'	=	'proteccionismocatalan'	, 'proteccionistascataluna'	=	'proteccionismocatalan'	, 'proteccionistacataluna'	=	'proteccionismocatalan'	, 'proteccionismocatalanes'	=	'proteccionismocatalan'	, 'proteccionismobarcelones'	=	'proteccionismocatalan'	, 'proteccionismobarcelona'	=	'proteccionismocatalan'	, 'catalunaproteccionismo'	=	'proteccionismocatalan' ,
+                 'proteccion'	=	'proteccionismo',	'proteger'	=	'proteccionismo',	'aumento arancelario'	=	'proteccionismo',	
+                 'proteccionista'='proteccionismo', 'proteccionistas'='proteccionismo',
+                 'reaccion proteccionista'	=	'reaccionproteccionista', 'reaccionproteccionismo'=	'reaccionproteccionista',
+                 'reciprocidades'	=	'reciprocidad',	'reciprocistas'	=	'reciprocidad',
+                 'reforma figuerola'	=	'arancelfiguerola',	'reforma arancelaria figuerola'	=	'arancelfiguerola',	'reforma 1869'	=	'arancelfiguerola',	'reforma arancelaria 1869'	=	'arancelfiguerola',	'arancel figuerola'	=	'arancelfiguerola',	'arancel 1869'	=	'arancelfiguerola',	'ley figuerola'	=	'arancelfiguerola',	'ley 1869'	=	'arancelfiguerola',
+                 'reforma arancelaria'	=	'reformaarancelaria',
+                 'renta aduanas'	=	'rentaaduanas', 'recaudación aduanera'	=	'rentaaduanas',
+                 'republicas americanas'	=	'sudamerica',	'republicas sudamericanas'	=	'sudamerica',	'america espanola'	=	'sudamerica',	'republicas suramerica'	=	'sudamerica',	'america'	=	'sudamerica',	'suramericanas'	=	'sudamerica', 'americasur'	=	'sudamerica', 'republicasamericanas'	=	'sudamerica',
+                 'siderurgia'	=	'siderurgica',	
+                 'socialistas'	=	'socialista',	'socialismo estado'	=	'socialista',
+                 'socialismo'	=	'socialista',
+                 'subsistencias'	=	'pan',	'alimento'	=	'pan',	'alimentos'	=	'pan',	'alimentacion'	=	'pan',	'alimenticia'	=	'pan',	'primera necesidad'	=	'pan',
+                 'sufragio universal'	=	'sufragio',	'voto'	=	'sufragio',	'votos'	=	'sufragio',	'democracia'	=	'sufragio',	'electores'	=	'sufragio',	'electoral'	=	'sufragio',
+                 'tapones'	=	'taponera',	
+                 'tejidos algodon'	=	'tejidosalgodon',	'tejido algodon'	=	'tejidosalgodon',	'telas algodon'	=	'tejidosalgodon',	'tejidosalgodoneros'=	'tejidosalgodon',
+                 'tejidos catalanes'	=	'tejidoscatalanes' ,
+                 'tejidos lana'	=	'tejidoslana',	'telas lana'	=	'tejidoslana',
+                 'tejido'	=	'tejidos',	'tejedores'	=	'tejidos',	'tejedor'	=	'tejidos',	'tela'	=	'tejidos',	'tules'	=	'tejidos',	'puntillas'	=	'tejidos',	'encajes'	=	'tejidos',	'panas'	=	'tejidos',	'veludillos'	=	'tejidos',	'urdimbre'	=	'tejidos',	'trama'	=	'tejidos',	'paneria'	=	'tejidos', 'telar'	=	'tejidos', 'telares'	=	'tejidos',
+                 'toneleria'	=	'tonel',	'barricas'	=	'tonel',	'envases'	=	'tonel', 'toneles'	=	'tonel'	,
+                 'tratado definitivo'	=	'tratadodefinitivo',	
+                 'tratado comercio alemania'	=	'tratadoalemania',	'tratado alemania'	=	'tratadoalemania',	'tratado comercio aleman'	=	'tratadoalemania',	'negociaciones alemania'	=	'tratadoalemania',	'tratado aleman'=	'tratadoalemania',
+                 'tratado comercio inglaterra'	=	'tratadoinglaterra',	'tratado comercio ingles'	=	'tratadoinglaterra',	'tratado ingles'	=	'tratadoinglaterra',	'tratado inglaterra'	=	'tratadoinglaterra',	'tratado anglo'	=	'tratadoinglaterra',	'negociacion inglaterra'	=	'tratadoinglaterra', 'convenioinglaterra'	=	'tratadoinglaterra',
+                 'tratado comercio francia'	=	'tratadofrancia',	'tratado franco espanol'	=	'tratadofrancia',	'tratado comercio frances'	=	'tratadofrancia',	'tratado francia'	=	'tratadofrancia',	'tratado frances'	=	'tratadofrancia',	'negociacion francia'	=	'tratadofrancia', 'franciatratado'=	'tratadofrancia',
+                 'tratado comercio'	=	'tratado',	'tratados comercio'	=	'tratado',	'tratados'	=	'tratado',	'convenio arancelario'	=	'tratado',	'tratados comerciales'	=	'tratado',	'negociar'	=	'tratado' ,
+                 'sueca'	=	'valencia',	'cullera'	=	'valencia', 'valenciano'	=	'valencia', 'valencianos'	=	'valencia', 'levante'	=	'valencia',
+                 'zollverein iberico'	=	'zollvereingiberico',	'union aduanera'	=	'zollvereingiberico',	'federacion'	=	'zollvereingiberico',	'liga aduanera'	=	'zollvereingiberico',	'tratado iberico'	=	'zollvereingiberico',	'union iberica'	=	'zollvereingiberico',	'zollverein'	=	'zollvereingiberico'	,
+                 'zollvereing'= 'zollvereingiberico',
+                 'africano'	=	'africa',	'algeria'	=	'africa',
+                 'seda rama'	=	'seda', 'sedarama'	=	'seda', 'sederos'	=	'seda', 'sedera'	=	'seda', 'sederias'	=	'seda',
+                 'caballos'	=	'caballar',
+                 'caro'='carestía',
+                 'carnes'='carne', 'pecuaria'='carne','reses'='carne',
+                 'crisis agricultura' ='crisis agricola', 'crisisagricola' = 'crisis agricola',
+                 'diputados catalanes'='diputado cataluna',
+                 'industria'='industriales',  'industrias'='industriales','industrial'='industriales',
+                 'gallegas'='galicia',
+                 'hambrientos'='hambre', 'hambrientas'='hambre', 'hambriento'='hambre', 'hambrienta'='hambre',
+                 'industria metalurgica'= 'industriametalurgica','metalurgica'= 'industriametalurgica', 'metalurgicas'='industriametalurgica',
+                 'jerezanos'='jerez', 'generosos'='jerez', 'malaga'='jerez', 'vinosandaluces'='jerez',
+                 'italiana'='italia', 'italianas'='italia', 'italianos'='italia',
+                 'mackinley'='kinley',
+                 'mercado frances'= 'mercadofrances','mercadofrancia'= 'mercadofrances', 'comerciofrancia'= 'mercadofrances',
+                 'nacionalidad'='nacion',
+                 'ocupado'='ocupacion','empleo'='ocupacion','trabajo'='ocupacion',
+                 'orden publico'='ordenpublico',
+                 'trabajadora'='trabajador', 'trabajadores'='trabajador', 'operarios'='trabajador',
+                 'valoraciones'='valoracion',
+                 'vascongado'='vascongadas', 
+                 'conservas'='conserva', 'conservera'='conserva'
+                 )
+
+
+includeWhiteSpaces <- function(x) str_c(' ', x ,' ')
+names(word_array) <- includeWhiteSpaces(names(word_array))
+word <- names(word_array)
+tran <- word_array[word]
+
+#tranformWords <- function(x) str_replace_all(x, word_array)
+tranformWords <- function(x) stri_replace_all_fixed(x, word, tran, vectorize_all = FALSE)
+
+
+# Own spanish diccionary
+#'senoresproteccionismo', 'proteccionismo','libertadcomercio',
+wordsToRemove_sp <- c('mas','senores', 'menos', 'el','la','los','las','un','uno','una','unos','que','del','a',
+                      'ante','bajo','con','contra','de','desde','durante','en','entre',
+                      'hacia','hasta','mediante','para','por','segun','sin','so','sobre',
+                      'tras','versus','via', 'ano', 'ser', 'generarlas', 'habla','aplicadas','partir','hoy', 'mayo', 'mejores',
+                      'pais','evento','mes','anos','cada','aqui', 
+                      'mejor','mayor','busca','puedes','cuanto','gracias','proximo','estan',
+                      'conoce', 'millones', 'asi', 'pierda', 'q', 'x', 'd', 'si', 'aplausos', 'espanoles',
+                      'tan', 'pues','todas', 'solo', 'bien', 'sino', 'aqui', 'tal','hacer','dicho','parte',
+                      'vez','tal', 'demas', 'hace', 'aquellos', 'decir', 'aquella', 'toda', 'voy', 'tambien', 'ahora',
+                      'todo', 'cuestion', 'hecho', 'senoras', 'senor', 'cuya', 'senores', 'graell', 'aun', 
+                      'nombre', 'mismo', 'punto', 'medio', 'mal', 'despues', 'fin', 'aquel', 'veces', 'nunca', 'pesetas', 'espana', 'manera', 'cuba', 'pais', 'puede', 'ademas', 'asociacion', 'asi', 'kilogramos', 'mismo', 
+                      'productos', 'pueden', 'ministro', 'senores', 'despues', 'grandes', 'vida', 'anos', 'palabra', 'hace', 'siempre', 
+                      'ahora', 'entonces', 'menos', 'pueblos', 'medios', 'medio', 'datos', 'meeting', 'nacionales', 'naciones', 
+                      'dos', 'palabra', 'hace', 'siempre', 'ahora', 'entonces', 'menos', 'pueblos', 'medios', 'medio', 'datos', 'meeting',
+                      'menos', 'nacionales', 'naciones', 'despues', 'decia', 'tambien', 'condiciones', 'voy', 'punto', 'bandera', 
+                      'diferencial', 'espanol', 'toda', 'tiempo', 'cuenta', 'momento', 'causa', 'pueblo', 'reales', 'dia', 'caso',
+                      'misma', 'duros', 'ano', 'demas', 'actual', 'que', 'solo', 'como', 'conviene', 'razon', 'aquel', 'verdad', 
+                      'alguna', 'articulos', 'dice', 'segun', 'aun', 'peninsula', 'modo', 'risas', 'alli', 'comision', 'diferencia',
+                      'igual', 'relojero', 'mientras', 'tierra', 'dinero', 'situacion', 'nuevo', 'via', 'van', 'amigo', 'respecto', 
+                      'gran', 'cla', 'casi', '100',	'120',	'450',	'1840',	'1859',	'1860',	'1867',	'1868',	'1874',	'1878',	'1880',	'1883',	
+                      '1884',	'2000',	'6000',	'80000',	'172675',	'¡ah',	'¿sabeis',	'100nla',	'1º',	'abiertos',	'abril',	'absoluta',
+                      'absurdo',	'acaba',	'acabo',	'acaso',	'accion',	'acerca',	'actitud',	'actividad',	'acto',	'adelante',	'adeudan',
+                      'adquirir',	'adverbio',	'adversarios',	'afirmacion',	'agitan',	'agravacion',	'ahi',	'alegria',	'alguien',	'algun',
+                      'alguno',	'alla',	'alma',	'alto',	'altura',	'alumbra',	'ambas',	'ambicion',	'ambos',	'amenazada',	'amenazas',	
+                      'amigos',	'amor',	'anterior',	'anteriores',	'antiguas',	'antillas',	'antropologicas',	'apenas',	'aplausosn',	'aplicacion',
+                      'apoyo',	'aprobacion',	'apruebe',	'aquellas',	'aquello',	'arbol',	'argumento',	'argumentos',	'armonia',	'arreglo',
+                      'arruinar',	'aspecto',	'aspiraciones',	'asunto',	'atencion',	'atender',	'aumentado',	'aumentar',	'aumento',	'aunque',
+                      'autor',	'azcarate',	'baja',	'banquete',	'baratas',	'barato',	'baratos',	'basta',	'bastante',	'beneficios',	'beraza',
+                      'bill',	'boca',	'bona',	'bonachon',	'boticario',	'breve',	'breves',	'brunet',	'buen',	'buena',	'buenas',	'bueno',
+                      'buenos',	'bultos',	'buscar',	'cabeza',	'cabo',	'cachet',	'caja',	'cajas',	'calculo',	'calculos',	'calumnia',	'calvo',
+                      'camacho',	'cambiar',	'cambio',	'camino',	'caminos',	'canovas',	'cantidad',	'cantidades',	'caprichosa',	'cara',	'caracter',
+                      'cargas',	'cargo',	'casa',	'castaneda',	'castelar',	'castillo',	'causas',	'celebrado',	'celebrar',	'celebre',	'centimos',
+                      'centro',	'cerrar',	'chelin',	'chelines',	'cielo',	'ciencia',	'cierta',	'ciertamente',	'ciertas',	'cierto',	'ciertos',	'cifra',
+                      'cifras',	'cinco',	'ciudades',	'civilizacion',	'claro',	'clausula',	'cliente',	'coche',	'colonias',	'comarcas',	'combatir',	'come',
+                      'comedia',	'comisiones',	'companeros',	'compensacion',	'competencia',	'competir',	'completa',	'completamente',	'completo',	'comprar',
+                      'comprende',	'compromiso',	'conceder',	'concepto',	'conciencia',	'concluir',	'condicion',	'conducta',	'conocen',	'conozco',
+                      'consecuencia',	'consecuencias',	'conseguido',	'conseguir',	'consejo',	'conservador',	'conservadores',	'conservar',
+                      'consideracion',	'considerar',	'consiguiente',	'consiste',	'constante',	'construccion',	'consumen',	'consumir',	'contestacion',
+                      'contestar',	'contrario',	'conveniencia',	'conveniente',	'convenientemente',	'corazon',	'corresponsal',	'corriente',	'corrientes',
+                      'cosa',	'cosas',	'coser',	'costa',	'creado',	'creais',	'creen',	'creer',	'creia',	'creo',	'criterio',	'cuales',	'cualquiera',	'cuantas',
+                      'cuantos',	'cuatro',	'cuentas',	'cuento',	'cuerpo',	'cuesta',	'cuyo',	'cuyos',	'dada',	'dado',	'dan',	'dano',	'dar',	'debe',	'debemos',
+                      'deben',	'deber',	'debia',	'debido',	'debo',	'decirlo',	'declaracion',	'decreto',	'defender',	'defensa',	'defensores',	'defiende',
+                      'defienden',	'dejar',	'demostracion',	'demostrado',	'demostrar',	'demostraron',	'demuestra',	'dentro',	'deseo',	'desgracia',
+                      'desgraciadamente',	'dias',	'dicen',	'diciembre',	'diciendo',	'dictamen',	'dificil',	'dificultades',	'diga',	'digno',	'digo',	'dijo',
+                      'dios',	'dire',	'dirigen',	'dirigido',	'discurso',	'discursos',	'discusion',	'discutir',	'diz',	'documento',	'documentos',	'duda',
+                      'efecto',	'efectos',	'egoismo',	'ejemplo',	'ejes',	'elaboran',	'elduayen',	'elemento',	'elementos',	'elevacion',	'elevado',	'ello',
+                      'elocuencia',	'elocuente',	'embargo',	'emilio',	'eminentemente',	'emplea',	'emplean',	'emplear',	'encargado',	'encontramos',	'encuentra',
+                      'encuentran',	'enfrente',	'enmiendas',	'ensenado',	'entrar',	'epoca',	'error',	'esclavo',	'esfuerzos',	'espanola',	'especialmente',	'especie',
+                      'espera',	'esperanza',	'esperanzas',	'esperar',	'espiritu',	'establecer',	'estadistica',	'estrellas',	'etc',	'evidente',	'evolucion',	'examinar',
+                      'exclusivamente',	'exige',	'exigencias',	'exigir',	'existe',	'explica',	'exporta',	'exposicion',	'facil',	'facilidad',	'falta',	'familia',	'fanega',
+                      'favor',	'favorece',	'favorecer',	'febrero',	'fecha',	'felicito',	'fenomeno',	'fernandez',	'figura',	'fija',	'fijado',	'fijar',	'fines',
+                      'fisonomia',	'fondo',	'forma',	'formar',	'fortuna',	'frase',	'frente',	'fuertes',	'fuerza',	'fuerzas',	'gabriel',	'galones',	'gana',	
+                      'ganancias',	'gastos',	'genero',	'generos',	'gentes',	'gobernacion',	'gobiernos',	'gomez',	'gomezmorier',	'gonzalez',	'grande',	'grandemente',
+                      'grave',	'habeis',	'haber',	'habia',	'habian',	'habiles',	'habitantes',	'hablar',	'hablo',	'habra',	'habria',	'hacemos',	'hacen',	'hacerlo',
+                      'hacerse',	'haciendo',	'haga',	'hara',	'hecha',	'hechos',	'hectareas',	'hectolitro',	'hectolitros',	'hijos',	'historia',	'hizo',	'hoja',	'hombre',	'hombres',
+                      'honra',	'hora',	'idea',	'idealespolitica',	'ido',	'ignorantes',	'ilustres',	'impedir',	'impone',	'importa',	'importaciones',	'importancia',	'importante',
+                      'importantes',	'importo',	'imposible',	'inconveniente',	'india',	'indispensables',	'individuos',	'inmensa',	'inmenso',	'inteligencia',	'interin',
+                      'introduccion',	'inundacion',	'jamas',	'jefe',	'juicio',	'julio',	'junio',	'junta',	'juntos',	'justicia',	'kilo',	'kilogramo',	'kilos',	'lado',	'legislacion',
+                      'lejos',	'lengua',	'levantar',	'liberal',	'libra',	'libros',	'limite',	'litros',	'livingstone',	'llama',	'llamada',	'llamado',	'llamar',	'llamo',	'llega',
+                      'llegado',	'llegar',	'lleva',	'llevar',	'lleve',	'logica',	'lucha',	'luchar',	'luego',	'lugar',	'luz',	'mala',	'males',	'manana',	'mancha',	'mano',	'manos',
+                      'mar',	'mares',	'marido',	'marques',	'masa',	'mayoria',	'medida',	'meetings',	'menor',	'merced',	'merece',	'meses',	'metodo',	'mil',	'minima',	'ministerio',
+                      'ministros',	'mismas',	'mismos',	'modico',	'modificaciones',	'momentos',	'moret',	'motivo',	'movimiento',	'mucha',	'muchas',	'muerte',	'mujer',	'mundo',	'munoz',
+                      'nadie',	'natural',	'naturalmente',	'necesarias',	'necesario',	'necesita',	'necesitan',	'negar',	'ningun',	'ninguna',	'noche',	'nota',	'noviembre',	'nubes',
+                      'nueva',	'nuevos',	'numero',	'objeto',	'obligan',	'obra',	'obtener',	'ocasion',	'octubre',	'ocurre',	'oficial',	'oido',	'oir',	'ojos',	'oposicion',	'orador',
+                      'oradores',	'organismo',	'padre',	'padros',	'paga',	'pagaba',	'pagan',	'pagar',	'pago',	'paises',	'palabras',	'paladar',	'par',	'parece',	'partes',
+                      'partido',	'partidos',	'pasado',	'pasan',	'paso',	'pasto',	'patriotico',	'patrioticoespanola',	'patriotismo',	'pedimos',	'pedir',	'pedregal',	'penalidad',
+                      'pensamiento',	'pensar',	'peor',	'perdida',	'perfectamente',	'periodo',	'perjudica',	'persona',	'personas',	'pesar',	'peticion',	'pide',	'pidiendo',	'pido',
+                      'piedra',	'pierde',	'plazo',	'pocos',	'podemos',	'poder',	'podia',	'podian',	'podido',	'podria',	'podriamos',	'politica',	'politicos',	'pone',	'poner',	'porvenir',
+                      'posible',	'practica',	'precedido',	'precisamente',	'preciso',	'presenta',	'presentado',	'presente',	'presidente',	'pretende',	'pretensiones',	'pretexto',	'prim',
+                      'primer',	'primero',	'principe',	'procedencia',	'procedimiento',	'procedimientos',	'produce',	'producido',	'producir',	'produjo',	'progresos',	'prohibicion',
+                      'prolongados',	'pronto',	'propia',	'propio',	'proposicion',	'proposito',	'proteccionismoarancelaria',	'protegidas',	'protegidos',	'protocolo',	'provecho',
+                      'provincias',	'prueba',	'publico',	'pudiera',	'pueda',	'puedo',	'puesto',	'puntos',	'puramente',	'queda',	'quejas',	'quereis',	'queremos',	'querido',	'quiera',
+                      'quiere',	'quieren',	'quiero',	'quiza',	'quizas',	'quo',	'razones',	'real',	'realidad',	'realmente',	'rebaja',	'rebajar',	'recargar',	'reclama',	'recuerda',
+                      'reformas',	'reformista',	'regiones',	'relacion',	'relativo',	'remedio',	'repetidos',	'repito',	'representa',	'representacion',	'representan',	'resto',	'resulta',
+                      'resultado',	'resultados',	'reunido',	'reunion',	'reuniones',	'reyes',	'rico',	'rios',	'rodriguez',	'romero',	'ruina',	'ruiz',	'sabe',	'sabeis',	'saber',	'sabido',	
+                      'sagasta',	'salen',	'salir',	'sangre',	'satisfacer',	'seguir',	'segundo',	'seguramente',	'seguridad',	'seis',	'semejante',	'sentido',	'sentimiento',
+                      'sera',	'seria',	'serie',	'serlo',	'siglo',	'significa',	'siguiente',	'silvela',	'siquiera',	'sirve',	'sola',	'solamente',	'sostener',	'sostenido',	'sres',
+                      'subsidiario',	'subsistencia',	'sucede',	'sucedia',	'sucedio',	'suelo',	'suerte',	'supuesto',	'tales',	'tampoco',	'tanta',	'tantas',	'tantos',	'tarde',	'tema',
+                      'temor',	'tendriamos',	'teneis',	'tener',	'tenia',	'tercera',	'termino',	'terreno',	'terrenos',	'terrible',	'tiempos',	'tierras',	'todavia',	'tonelada',
+                      'toneladas',	'total',	'totalidad',	'trabas',	'traer',	'traido',	'transigir',	'trasformacion',	'trata',	'tratar',	'tres',	'triunfo',	'ultima',	'ultimo',	'ultimos',
+                      'unidad',	'urgencia',	'uso',	'utilidad',	'vale',	'valor',	'valores',	'vamos',	'vapores',	'ven',	'vender',	'vengan',	'vengo',	'venido',	'venimos',	'venir',
+                      'ventajas',	'veo',	'ver',	'verdadera',	'verdaderamente',	'vereis',	'viene',	'vienen',	'viento',	'virtud',	'vista',	'visto',	'vivir',	'volver',	'voz',	'zapatero'
+)
+
+
+# Main function
+text_cleaner <- function(text){
+  Corpus(VectorSource(text)) %>% 
+    tm_map(content_transformer(removeAccents)) %>% 
+    #tm_map(content_transformer(removeMentions)) %>%
+    #tm_map(content_transformer(removeHashtags)) %>%
+    #tm_map(content_transformer(removeEmojis)) %>%
+    #tm_map(content_transformer(accents)) %>%
+    #tm_map(content_transformer(removeNumPunct)) %>% 
+    tm_map(content_transformer(removePunctuation)) %>% 
+    #tm_map(content_transformer(removeURL)) %>%
+    #tm_map(content_transformer(removeNumbers)) %>%
+    # For visualisation purporses we do not use the stemming function
+    #tm_map(content_transformer(stemDocument)) %>%
+    #tm_map(content_transformer(singularize_text))%>% 
+    tm_map(content_transformer(tolower))%>% 
+    #tm_map(content_transformer(function(x) removeWords(x, stopwords(kind = "en")))) %>%
+    #tm_map(content_transformer(function(x) removeWords(x, stopwords(kind = "smart")))) %>%
+    tm_map(content_transformer(function(x) removeWords(x, tm::stopwords(kind = "es")))) %>%
+    #tm_map(content_transformer(function(x) removeWords(x, wordsToRemove_en))) 
+    tm_map(content_transformer(function(x) removeWords(x, wordsToRemove_sp))) %>% 
+    tm_map(content_transformer(tranformWords)) %>%
+    tm_map(stripWhitespace) 
+}

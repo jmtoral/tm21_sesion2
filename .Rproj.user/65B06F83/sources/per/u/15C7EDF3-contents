@@ -1,0 +1,27 @@
+pacman::p_load(tidyverse, rvest, tidytext, tm)
+
+
+
+url <- "https://lopezobrador.org.mx/2021/09/01/discurso-del-presidente-andres-manuel-lopez-obrador-durante-el-tercer-informe-de-gobierno/"
+
+informe <- url %>% 
+  read_html() %>% 
+  html_nodes(".entry-content p") %>% 
+  html_text() %>% 
+  as_tibble() 
+
+tokens <- informe %>% 
+  unnest_tokens(palabras, value) %>% 
+  filter(!palabras %in% c(tm::stopwords("es"),
+                          "decir")) %>% 
+  count(palabras, sort = T)
+
+tokens %>% 
+  head(20) %>% 
+  ggplot(aes(reorder(palabras, n), n)) +
+  geom_col() +
+  coord_flip() +
+  labs(x = "Frecuencia",
+       y = "Palabras",
+       title = "Las 20 palabras más frecuentes del Tercer Informe de Gobierno") +
+  hrbrthemes::theme_ipsum()

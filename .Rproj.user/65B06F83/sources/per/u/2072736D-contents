@@ -1,0 +1,65 @@
+library(tidyverse)
+library(rvest)
+
+# Album
+
+url <- "https://genius.com/artists/albums?for_artist_page=354949&id=Juan-gabriel"
+
+links <- url %>% 
+  read_html() %>% 
+  html_nodes("a") %>% 
+  html_attr("href") %>% 
+  as_tibble() %>% 
+  filter(str_detect(value, "Juan-gabriel")) %>% 
+  mutate(value = str_c("https://genius.com", value))
+
+
+lyr_links <- lapply(links$value, function(url){
+  
+  url %>% 
+    read_html() %>% 
+    html_nodes("a") %>% 
+    html_attr("href") %>% 
+    as_tibble() %>% 
+    filter(str_detect(value, "lyrics")) 
+  
+})
+
+lyr_links <- bind_rows(lyr_links)
+
+
+
+
+lyrics_jg <- lapply(lyr_links$value, function(url){
+  
+  qrd <- read_html(url) %>% 
+    html_nodes('.lyrics p') %>% 
+    html_text() 
+  
+  tibble(text = qrd) %>%
+    mutate(text = str_split(text, pattern = "\\n")) %>%
+    unnest(cols = c(text)) 
+  
+})
+
+lyrics_jg <- bind_rows(lyrics_jg)
+
+
+
+
+
+
+
+
+
+
+
+
+
+qrd <- read_html("https://genius.com/Juan-gabriel-se-me-olvido-otra-vez-en-vivo-en-el-palacio-de-bellas-artes-lyrics") %>% 
+  html_nodes(xpath ='//*[contains(concat( " ", @class, " " ), concat( " ", "lyrics", " " ))]') %>% 
+  html_text() 
+
+tibble(text = qrd) %>%
+  mutate(text = str_split(text, pattern = "\\n")) %>%
+  unnest(cols = c(text)) 
